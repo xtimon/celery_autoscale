@@ -103,8 +103,8 @@ def autoscale(config):
     for queue in config['celery_queues'].split(','):
         sum_queue_length += get_queue_length(queue)
     if sum_queue_length > config['scaling_step']:
-        to_do_list = [check_la(bg_stats), check_mem(bg_stats), check_swap(bg_stats),
-                      check_la(db_stats), check_mem(db_stats), check_swap(db_stats)]
+        to_do_list = [check_la(bg_stats), check_mem(bg_stats, config['minimal_cache']), check_swap(bg_stats),
+                      check_la(db_stats), check_mem(db_stats, config['minimal_cache']), check_swap(db_stats)]
         if -1 in to_do_list:
             shrink_pool(config['scaling_step'], config['celery_node'])
         elif all(x==1 for x in to_do_list):
