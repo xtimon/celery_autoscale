@@ -107,7 +107,7 @@ def autoscale(config):
                       check_la(db_stats), check_mem(db_stats, config['minimal_cache']), check_swap(db_stats)]
         if -1 in to_do_list:
             shrink_pool(config['scaling_step'], config['celery_node'])
-        elif all(x==1 for x in to_do_list):
+        elif all(x == 1 for x in to_do_list):
             grow_pool(config['scaling_step'], config['celery_node'])
         else:
             if config['debug']:
