@@ -10,6 +10,7 @@ import configparser
 import rabbitpy
 import multiprocessing
 import json
+import time
 
 
 project_path = os.path.dirname(__file__)
@@ -148,18 +149,20 @@ def main():
     if os.path.isfile(args.config):
         config = configparser.ConfigParser()
         config.read_file(open(args.config))
-        for section in config.sections():
-            s = dict()
-            s['celery_node'] = config.get(section, 'celery_node')
-            s['celery_queues'] = config.get(section, 'celery_queues')
-            s['db_stats_file'] = config.get(section, 'db_stats_file')
-            s['min_processes'] = config.getint(section, 'min_processes')
-            s['max_processes'] = config.getint(section, 'max_processes')
-            s['scale_log'] = config.get(section, 'scale_log')
-            s['minimal_cache'] = config.getfloat(section, 'minimal_cache_size_percent')
-            s['scaling_step'] = config.getint(section, 'scaling_step')
-            s['debug'] = config.getboolean(section, 'debug')
-            autoscale(s)
+        while True:
+            for section in config.sections():
+                s = dict()
+                s['celery_node'] = config.get(section, 'celery_node')
+                s['celery_queues'] = config.get(section, 'celery_queues')
+                s['db_stats_file'] = config.get(section, 'db_stats_file')
+                s['min_processes'] = config.getint(section, 'min_processes')
+                s['max_processes'] = config.getint(section, 'max_processes')
+                s['scale_log'] = config.get(section, 'scale_log')
+                s['minimal_cache'] = config.getfloat(section, 'minimal_cache_size_percent')
+                s['scaling_step'] = config.getint(section, 'scaling_step')
+                s['debug'] = config.getboolean(section, 'debug')
+                autoscale(s)
+                time.sleep(60)
     else:
         print("Configuration file can not be found")
         exit(1)
