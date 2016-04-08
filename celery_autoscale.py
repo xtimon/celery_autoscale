@@ -35,7 +35,10 @@ def get_stats():
 
 
 def get_node_proc_count(celery_node):
-    return len(celery.control.inspect().stats()[celery_node]['pool']['processes'])
+    try:
+        return len(celery.control.inspect().stats()[celery_node]['pool']['processes'])
+    except:
+        return -1
 
 
 def get_queue_length(queue):
@@ -104,32 +107,37 @@ def autoscale(config):
     bg_stats = get_stats()
     db_stats = json.load(open(config['db_stats_file']))
     sum_queue_length = 0
-    for queue in config['celery_queues'].split(','):
-        sum_queue_length += get_queue_length(queue)
-    if sum_queue_length > config['scaling_step']:
-        to_do_list = [check_la(bg_stats), check_mem(bg_stats, config['minimal_cache']), check_swap(bg_stats),
-                      check_la(db_stats), check_mem(db_stats, config['minimal_cache']), check_swap(db_stats)]
-        if -1 in to_do_list:
-            shrink_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
-        elif all(x == 1 for x in to_do_list):
-            grow_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
-        else:
+    processes_count = get_node_proc_count(config['celery_node'])
+    if processes_count >= 0:
+        for queue in config['celery_queues'].split(','):
+            sum_queue_length += get_queue_length(queue)
+        if sum_queue_length > config['scaling_step']:
+            to_do_list = [check_la(bg_stats), check_mem(bg_stats, config['minimal_cache']), check_swap(bg_stats),
+                          check_la(db_stats), check_mem(db_stats, config['minimal_cache']), check_swap(db_stats)]
+            if -1 in to_do_list:
+                shrink_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
+            elif all(x == 1 for x in to_do_list):
+                grow_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
+            else:
+                if config['debug']:
+                    timed_print("nothing to do (processes count {0}, queues length: {1})".format(
+                        get_node_proc_count(config['celery_node']), sum_queue_length
+                    ))
             if config['debug']:
+                print_all_stats(bg_stats, db_stats)
+        else:
+            if get_node_proc_count(config['celery_node']) > config['min_processes']:
+                shrink_pool(int(config['scaling_step']), config['celery_node'], sum_queue_length)
+                if config['debug']:
+                    print_all_stats(bg_stats, db_stats)
+            elif config['debug']:
                 timed_print("nothing to do (processes count {0}, queues length: {1})".format(
                     get_node_proc_count(config['celery_node']), sum_queue_length
                 ))
-        if config['debug']:
-            print_all_stats(bg_stats, db_stats)
-    else:
-        if get_node_proc_count(config['celery_node']) > config['min_processes']:
-            shrink_pool(int(config['scaling_step']), config['celery_node'], sum_queue_length)
-            if config['debug']:
                 print_all_stats(bg_stats, db_stats)
-        elif config['debug']:
-            timed_print("nothing to do (processes count {0}, queues length: {1})".format(
-                get_node_proc_count(config['celery_node']), sum_queue_length
-            ))
-            print_all_stats(bg_stats, db_stats)
+    else:
+        if config['debug']:
+            timed_print("node stopped")
 
 
 def main():
