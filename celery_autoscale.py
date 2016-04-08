@@ -12,6 +12,11 @@ import multiprocessing
 import json
 
 
+project_path = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(project_path, '../'))
+sys.path.insert(0, os.path.join(project_path, 'plugins'))
+
+
 def timed_print(S):
     print("{0}: {1}".format(datetime.datetime.now(), S))
 
@@ -30,13 +35,14 @@ def get_stats():
 
 
 def get_node_proc_count(celery_node):
-    return celery.control.inspect().stats()[celery_node]['pool']['writes']['inqueues']['total']
+    return len(celery.control.inspect().stats()[celery_node]['pool']['processes'])
 
 
 def get_queue_length(queue):
-    amqp_connection_string = celery.broker_connection().as_uri()
-    amqp_password = celery.broker_connection().info().__getitem__('password')
-    amqp_connection_string = amqp_connection_string.replace('**', amqp_password)
+    amqp_info = celery.broker_connection().info()
+    amqp_connection_string = "amqp://{0}:{1}@{2}:{3}/{4}".format(
+        amqp_info['userid'], amqp_info['password'], amqp_info['hostname'], amqp_info['port'], amqp_info['virtual_host']
+    )
     with rabbitpy.Connection(amqp_connection_string) as conn:
             with conn.channel() as channel:
                queue_length = len(rabbitpy.Queue(channel, queue))
@@ -48,17 +54,17 @@ def print_all_stats(bg_stats, db_stats):
     timed_print("db_stats: {0}".format(db_stats))
 
 
-def shrink_pool(scaling_step, celery_node):
+def shrink_pool(scaling_step, celery_node, queues_length):
     celery.control.pool_shrink(scaling_step, [celery_node])
-    timed_print("-{0} (processes count {1})".format(
-        scaling_step, get_node_proc_count(celery_node)
+    timed_print("-{0} (processes count {1}, queues length: {2})".format(
+        scaling_step, get_node_proc_count(celery_node), queues_length
     ))
 
 
-def grow_pool(scaling_step, celery_node):
+def grow_pool(scaling_step, celery_node, queues_length):
     celery.control.pool_grow(scaling_step, [celery_node])
-    timed_print("+{0} (processes count {1})".format(
-        scaling_step, get_node_proc_count(celery_node)
+    timed_print("+{0} (processes count {1}, queues length: {2})".format(
+        scaling_step, get_node_proc_count(celery_node), queues_length
     ))
 
 
@@ -97,8 +103,6 @@ def autoscale(config):
     sys.stderr = open(config['scale_log'], 'a')
     bg_stats = get_stats()
     db_stats = json.load(open(config['db_stats_file']))
-    print(bg_stats)
-    print(db_stats)
     sum_queue_length = 0
     for queue in config['celery_queues'].split(','):
         sum_queue_length += get_queue_length(queue)
@@ -106,21 +110,25 @@ def autoscale(config):
         to_do_list = [check_la(bg_stats), check_mem(bg_stats, config['minimal_cache']), check_swap(bg_stats),
                       check_la(db_stats), check_mem(db_stats, config['minimal_cache']), check_swap(db_stats)]
         if -1 in to_do_list:
-            shrink_pool(config['scaling_step'], config['celery_node'])
+            shrink_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
         elif all(x == 1 for x in to_do_list):
-            grow_pool(config['scaling_step'], config['celery_node'])
+            grow_pool(config['scaling_step'], config['celery_node'], sum_queue_length)
         else:
             if config['debug']:
-                timed_print("nothing to do (processes count {0})".format(get_node_proc_count(config['celery_node'])))
+                timed_print("nothing to do (processes count {0}, queues length: {1})".format(
+                    get_node_proc_count(config['celery_node']), sum_queue_length
+                ))
         if config['debug']:
             print_all_stats(bg_stats, db_stats)
     else:
         if get_node_proc_count(config['celery_node']) > config['min_processes']:
-            shrink_pool(int(config['scaling_step']), config['celery_node'])
+            shrink_pool(int(config['scaling_step']), config['celery_node'], sum_queue_length)
             if config['debug']:
                 print_all_stats(bg_stats, db_stats)
         elif config['debug']:
-            timed_print("nothing to do (processes count {0})".format(get_node_proc_count(config['celery_node'])))
+            timed_print("nothing to do (processes count {0}, queues length: {1})".format(
+                get_node_proc_count(config['celery_node']), sum_queue_length
+            ))
             print_all_stats(bg_stats, db_stats)
 
 
@@ -134,15 +142,15 @@ def main():
         config.read_file(open(args.config))
         for section in config.sections():
             s = dict()
-            s['celery_node'] = str(config.get(section, 'celery_node'))
-            s['celery_queues'] = str(config.get(section, 'celery_queues'))
-            s['db_stats_file'] = str(config.get(section, 'db_stats_file'))
-            s['min_processes'] = int(config.get(section, 'min_processes'))
-            s['max_processes'] = int(config.get(section, 'max_processes'))
-            s['scale_log'] = str(config.get(section, 'scale_log'))
-            s['minimal_cache'] = float(config.get(section, 'minimal_cache_size_percent'))
-            s['scaling_step'] = int(config.get(section, 'scaling_step'))
-            s['debug'] = bool(config.get(section, 'debug'))
+            s['celery_node'] = config.get(section, 'celery_node')
+            s['celery_queues'] = config.get(section, 'celery_queues')
+            s['db_stats_file'] = config.get(section, 'db_stats_file')
+            s['min_processes'] = config.getint(section, 'min_processes')
+            s['max_processes'] = config.getint(section, 'max_processes')
+            s['scale_log'] = config.get(section, 'scale_log')
+            s['minimal_cache'] = config.getfloat(section, 'minimal_cache_size_percent')
+            s['scaling_step'] = config.getint(section, 'scaling_step')
+            s['debug'] = config.getboolean(section, 'debug')
             autoscale(s)
     else:
         print("Configuration file can not be found")
