@@ -85,7 +85,7 @@ def check_la(stats):
 def check_mem(stats, min_cache):
     interval = 5
     free = float(stats['mem_free_kib'] + stats['mem_cached']) / stats['mem_total_kib'] * 100
-    if free > min_cache - interval and free < min_cache + 5:
+    if free > min_cache - interval and free < min_cache + interval:
         return 0
     elif free > min_cache:
         return 1
